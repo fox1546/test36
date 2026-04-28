@@ -23,6 +23,7 @@ static HWND g_hWndMain = NULL;
 static int g_nWindowWidth = 800;
 static int g_nWindowHeight = 600;
 static DWORD g_dwVolume = 0xFFFF;
+static WCHAR g_szMciAlias[] = L"MP3PlayerAlias";
 
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -142,9 +143,10 @@ BOOL OpenMP3File(HWND hWnd)
         ZeroMemory(&mciOpenParms, sizeof(mciOpenParms));
         mciOpenParms.lpstrDeviceType = L"mpegvideo";
         mciOpenParms.lpstrElementName = g_szCurrentFile;
+        mciOpenParms.lpstrAlias = g_szMciAlias;
 
         MCIERROR mciError = mciSendCommand(0, MCI_OPEN, 
-            MCI_OPEN_TYPE | MCI_OPEN_ELEMENT, 
+            MCI_OPEN_TYPE | MCI_OPEN_ELEMENT | MCI_OPEN_ALIAS, 
             (DWORD_PTR)&mciOpenParms);
 
         if (mciError == 0)
@@ -512,24 +514,20 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 BOOL SetVolume(DWORD dwVolume)
 {
+    g_dwVolume = dwVolume;
+    
     if (g_wDeviceID == 0)
     {
-        g_dwVolume = dwVolume;
         return TRUE;
     }
 
     int nVolumePercent = (int)((dwVolume * 100) / 0xFFFF);
-    WCHAR szCommand[128];
-    swprintf_s(szCommand, L"setaudio volume to %d", nVolumePercent);
+    WCHAR szCommand[256];
+    swprintf_s(szCommand, L"setaudio %s volume to %d", g_szMciAlias, nVolumePercent);
 
     MCIERROR mciError = mciSendStringW(szCommand, NULL, 0, NULL);
 
-    if (mciError == 0)
-    {
-        g_dwVolume = dwVolume;
-        return TRUE;
-    }
-    return FALSE;
+    return (mciError == 0);
 }
 
 DWORD GetVolume()
