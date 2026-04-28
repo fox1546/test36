@@ -3,6 +3,7 @@
 
 #include "framework.h"
 #include "mfc_demo.h"
+#include <commctrl.h>
 
 #define MAX_LOADSTRING 100
 #define TIMER_ANIMATION 1001
@@ -21,11 +22,13 @@ static double g_dBeatPhase = 0.0;
 static HWND g_hWndMain = NULL;
 static int g_nWindowWidth = 800;
 static int g_nWindowHeight = 600;
+static DWORD g_dwVolume = 0xFFFF;
 
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK    VolumeDlgProc(HWND, UINT, WPARAM, LPARAM);
 
 BOOL OpenMP3File(HWND hWnd);
 BOOL PlayMP3(HWND hWnd);
@@ -34,6 +37,8 @@ BOOL StopMP3(HWND hWnd);
 BOOL CloseMP3(HWND hWnd);
 void DrawDancingFigure(HDC hdc, RECT* prcClient);
 void UpdateBeatIntensity();
+BOOL SetVolume(DWORD dwVolume);
+DWORD GetVolume();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -122,7 +127,7 @@ BOOL OpenMP3File(HWND hWnd)
     ofn.lpstrFile = szFileName;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-    ofn.lpstrTitle = L"选择MP3文件";
+    ofn.lpstrTitle = L"Select MP3 File";
 
     if (GetOpenFileNameW(&ofn))
     {
@@ -149,13 +154,14 @@ BOOL OpenMP3File(HWND hWnd)
             g_bPaused = FALSE;
             g_nAnimationFrame = 0;
             g_dBeatIntensity = 0.0;
+            SetVolume(g_dwVolume);
             return TRUE;
         }
         else
         {
             WCHAR szError[256];
             mciGetErrorStringW(mciError, szError, 256);
-            MessageBoxW(hWnd, szError, L"打开MP3失败", MB_ICONERROR);
+            MessageBoxW(hWnd, szError, L"Error", MB_ICONERROR);
             return FALSE;
         }
     }
@@ -166,7 +172,7 @@ BOOL PlayMP3(HWND hWnd)
 {
     if (g_wDeviceID == 0)
     {
-        MessageBoxW(hWnd, L"请先打开MP3文件", L"提示", MB_ICONINFORMATION);
+        MessageBoxW(hWnd, L"Please open an MP3 file first", L"Info", MB_ICONINFORMATION);
         return FALSE;
     }
 
@@ -192,13 +198,14 @@ BOOL PlayMP3(HWND hWnd)
     {
         g_bPlaying = TRUE;
         g_bPaused = FALSE;
+        SetVolume(g_dwVolume);
         return TRUE;
     }
     else
     {
         WCHAR szError[256];
         mciGetErrorStringW(mciError, szError, 256);
-        MessageBoxW(hWnd, szError, L"播放失败", MB_ICONERROR);
+        MessageBoxW(hWnd, szError, L"Error", MB_ICONERROR);
         return FALSE;
     }
 }
@@ -406,6 +413,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_STOP:
                 StopMP3(hWnd);
                 break;
+            case IDM_VOLUME:
+                DialogBox(hInst, MAKEINTRESOURCE(IDD_VOLUME_DIALOG), hWnd, VolumeDlgProc);
+                break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
@@ -437,15 +447,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 WCHAR szStatus[512];
                 if (g_bPlaying)
                 {
-                    swprintf_s(szStatus, L"正在播放: %s", g_szCurrentFile);
+                    swprintf_s(szStatus, L"Playing: %s", g_szCurrentFile);
                 }
                 else if (g_bPaused)
                 {
-                    swprintf_s(szStatus, L"已暂停: %s", g_szCurrentFile);
+                    swprintf_s(szStatus, L"Paused: %s", g_szCurrentFile);
                 }
                 else
                 {
-                    swprintf_s(szStatus, L"已加载: %s", g_szCurrentFile);
+                    swprintf_s(szStatus, L"Loaded: %s", g_szCurrentFile);
                 }
                 
                 SetBkMode(hdc, TRANSPARENT);
@@ -454,7 +464,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
             else
             {
-                WCHAR szHint[] = L"请通过 目录->打开 选择一个MP3文件";
+                WCHAR szHint[] = L"Use: Directory -> Open to select an MP3 file";
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, RGB(128, 128, 128));
                 TextOutW(hdc, 10, 10, szHint, (int)wcslen(szHint));
@@ -488,6 +498,75 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_INITDIALOG:
         return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+        {
+            EndDialog(hDlg, LOWORD(wParam));
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    return (INT_PTR)FALSE;
+}
+
+BOOL SetVolume(DWORD dwVolume)
+{
+    if (g_wDeviceID == 0)
+    {
+        g_dwVolume = dwVolume;
+        return TRUE;
+    }
+
+    int nVolumePercent = (int)((dwVolume * 100) / 0xFFFF);
+    WCHAR szCommand[128];
+    swprintf_s(szCommand, L"setaudio volume to %d", nVolumePercent);
+
+    MCIERROR mciError = mciSendStringW(szCommand, NULL, 0, NULL);
+
+    if (mciError == 0)
+    {
+        g_dwVolume = dwVolume;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+DWORD GetVolume()
+{
+    return g_dwVolume;
+}
+
+INT_PTR CALLBACK VolumeDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        {
+            HWND hSlider = GetDlgItem(hDlg, IDC_VOLUME_SLIDER);
+            if (hSlider)
+            {
+                SendMessage(hSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100));
+                SendMessage(hSlider, TBM_SETPAGESIZE, 0, 10);
+                SendMessage(hSlider, TBM_SETLINESIZE, 0, 1);
+                
+                int nVolume = (int)((GetVolume() * 100) / 0xFFFF);
+                SendMessage(hSlider, TBM_SETPOS, TRUE, nVolume);
+            }
+            return (INT_PTR)TRUE;
+        }
+
+    case WM_HSCROLL:
+        {
+            HWND hSlider = GetDlgItem(hDlg, IDC_VOLUME_SLIDER);
+            if (hSlider)
+            {
+                int nPos = (int)SendMessage(hSlider, TBM_GETPOS, 0, 0);
+                DWORD dwVolume = (DWORD)((nPos * 0xFFFF) / 100);
+                SetVolume(dwVolume);
+            }
+            return (INT_PTR)TRUE;
+        }
 
     case WM_COMMAND:
         if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
